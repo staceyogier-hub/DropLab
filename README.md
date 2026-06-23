@@ -20,8 +20,10 @@ DropLab is built for handling sensitive data on the machine, with **no data egre
   browser. Nothing is uploaded; data never leaves the machine.
 - **Offline-capable build.** `npm run build` emits static files (relative paths) that run by opening
   `dist/index.html` directly or serving `dist/` from any local static server — no internet required.
-- The Vite module-preload polyfill is disabled and the app ships as a single bundle, so there is no
-  runtime `fetch` of any kind.
+- The Vite module-preload polyfill is disabled, so the built bundle contains **no `fetch`,
+  `XMLHttpRequest` or `sendBeacon`** and no external endpoints (audited on each build). The only
+  same-origin asset loaded at runtime is an optional analysis **Web Worker** script; when it can't be
+  loaded (e.g. opening from `file://`), analysis falls back to the main thread automatically.
 
 Suitable for **OFFICIAL: SENSITIVE** handling. (The *build* step downloads npm dependencies once;
 the *built app* makes no network calls.)
@@ -46,6 +48,38 @@ npm run lint       # ESLint (no `any` in committed code)
 npm run test       # Vitest unit tests
 npm run build      # production build
 ```
+
+## Desktop build (optional, Tauri)
+
+A native desktop target wraps the **same** frontend (no engine or UI changes) into a small binary
+with native file open/save dialogs, via Tauri v2.
+
+```bash
+npm run tauri:dev     # run the desktop app against the dev server
+npm run tauri:build   # produce a native binary + installers
+```
+
+The web app detects the Tauri shell at runtime (`window.__TAURI__`) and uses native Save/Open
+dialogs; in a browser it falls back to ordinary downloads and a file input. No Tauri code is bundled
+into the web build.
+
+**Prerequisites:** the Rust toolchain plus the platform webview libraries. On Debian/Ubuntu:
+`webkit2gtk-4.1` and `librsvg2-dev` (see <https://v2.tauri.app/start/prerequisites/>). Run
+`npx tauri icon src-tauri/icons/icon.png` to regenerate the full icon set (the committed icons are
+plain placeholders). The desktop binary is **not** built in CI here, as those system libraries are
+environment-specific.
+
+## Performance & robustness
+
+- **Off the main thread.** Filtering and metric computation run in a Web Worker (`runAnalysis`), so
+  large, high-rate, multi-node files stay responsive. The engine stays pure and worker-callable, and
+  there is an automatic in-thread fallback.
+- **Friendly errors.** Malformed CSVs produce clear, line-aware messages; oversized files are
+  rejected with guidance; a React error boundary keeps one bad component from blanking the app. No
+  error is reported anywhere — local console only.
+- **Accessibility.** Keyboard-navigable tabs (arrow/Home/End) with `tablist`/`tab`/`tabpanel` roles,
+  a skip-to-content link, labelled inputs, `aria-live` status for analysis, and the navy/steel
+  palette chosen for contrast.
 
 ## Architecture
 
