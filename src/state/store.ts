@@ -1,7 +1,8 @@
 /**
  * DropLab application store (Zustand). Holds test config, thresholds, the
  * loaded dataset and computed result, the active CFC, A/B runs and the active
- * tab. Recomputes the analysis whenever the inputs change.
+ * tab. Recomputes the analysis (off the main thread when possible) whenever the
+ * inputs change.
  */
 import { create } from 'zustand';
 import type {
@@ -12,9 +13,9 @@ import type {
   TestConfig,
   Thresholds,
 } from '../domain/types';
-import { analyse } from '../engine/analyse';
 import { validCfcClasses } from '../engine/filters';
 import { generateAirdrop, generateExternalLift } from '../engine/generators';
+import { runAnalysis } from './analysisClient';
 import { DEFAULT_CONFIG, DEFAULT_THRESHOLDS } from './thresholds';
 import { getPreset, type Preset } from './presets';
 
@@ -43,39 +44,30 @@ interface StoreState {
   runA: ComparisonRun | null;
   runB: ComparisonRun | null;
   notice: string | null;
+  error: string | null;
+  computing: boolean;
 
   setTab: (tab: TabId) => void;
-  setConfig: (patch: Partial<TestConfig>) => void;
-  setThresholds: (patch: Partial<Thresholds>) => void;
-  setCfc: (cfc: CfcSelection) => void;
-  applyPreset: (presetId: string) => void;
-  setDataset: (dataset: Dataset) => void;
-  generateFromConfig: () => void;
-  recompute: () => void;
+  setConfig: (patch: Partial<TestConfig>) => Promise<void>;
+  setThresholds: (patch: Partial<Thresholds>) => Promise<void>;
+  setCfc: (cfc: CfcSelection) => Promise<void>;
+  applyPreset: (presetId: string) => Promise<void>;
+  setDataset: (dataset: Dataset) => Promise<void>;
+  generateFromConfig: () => Promise<void>;
+  recompute: () => Promise<void>;
   setRun: (slot: 'A' | 'B', run: ComparisonRun | null) => void;
   setNotice: (notice: string | null) => void;
+  setError: (error: string | null) => void;
 }
+
+// Monotonic token so stale (superseded) async results are discarded.
+let recomputeToken = 0;
 
 function bestCfcFor(fs: number, current: CfcSelection): CfcSelection {
   if (current === 'unfiltered') return current;
   const valid = validCfcClasses(fs);
   if (valid.includes(current)) return current;
-  // Fall back to the highest valid class, else unfiltered.
   return valid.length > 0 ? valid[valid.length - 1] : 'unfiltered';
-}
-
-function runAnalysis(
-  dataset: Dataset,
-  cfc: CfcSelection,
-  thresholds: Thresholds,
-  config: TestConfig,
-): AnalysisResult {
-  return analyse(dataset, {
-    cfc,
-    thresholds,
-    suspendedMassKg: config.suspendedMassKg,
-    pendantLengthM: config.pendantLengthM,
-  });
 }
 
 function presetToConfig(preset: Preset, base: TestConfig): TestConfig {
@@ -103,44 +95,45 @@ export const useStore = create<StoreState>((set, get) => ({
   runA: null,
   runB: null,
   notice: null,
+  error: null,
+  computing: false,
 
   setTab: (tab) => set({ activeTab: tab }),
-
   setNotice: (notice) => set({ notice }),
+  setError: (error) => set({ error }),
 
-  setConfig: (patch) => {
-    const config = { ...get().config, ...patch, presetId: null };
-    set({ config });
-    get().recompute();
+  setConfig: async (patch) => {
+    set({ config: { ...get().config, ...patch, presetId: null } });
+    await get().recompute();
   },
 
-  setThresholds: (patch) => {
-    const thresholds = { ...get().thresholds, ...patch };
-    set({ thresholds, config: { ...get().config, presetId: null } });
-    get().recompute();
+  setThresholds: async (patch) => {
+    set({
+      thresholds: { ...get().thresholds, ...patch },
+      config: { ...get().config, presetId: null },
+    });
+    await get().recompute();
   },
 
-  setCfc: (cfc) => {
+  setCfc: async (cfc) => {
     set({ cfc });
-    get().recompute();
+    await get().recompute();
   },
 
-  applyPreset: (presetId) => {
+  applyPreset: async (presetId) => {
     const preset = getPreset(presetId);
     if (!preset) return;
-    const config = presetToConfig(preset, get().config);
-    set({ config, thresholds: { ...preset.thresholds } });
-    get().recompute();
+    set({ config: presetToConfig(preset, get().config), thresholds: { ...preset.thresholds } });
+    await get().recompute();
   },
 
-  setDataset: (dataset) => {
-    const { thresholds, config } = get();
+  setDataset: async (dataset) => {
     const cfc = bestCfcFor(dataset.sampleRate, get().cfc);
-    const result = runAnalysis(dataset, cfc, thresholds, { ...config, mode: dataset.mode });
-    set({ dataset, cfc, result, config: { ...config, mode: dataset.mode } });
+    set({ dataset, cfc, config: { ...get().config, mode: dataset.mode } });
+    await get().recompute();
   },
 
-  generateFromConfig: () => {
+  generateFromConfig: async () => {
     const { config } = get();
     const preset = getPreset(config.presetId);
     let dataset: Dataset;
@@ -164,19 +157,35 @@ export const useStore = create<StoreState>((set, get) => ({
         source: preset ? `Simulated ${preset.label}` : undefined,
       });
     }
-    get().setDataset(dataset);
-    set({ notice: 'Simulated dataset generated — clearly labelled as simulated.' });
+    set({ notice: 'Simulated dataset generated — clearly labelled as simulated.', error: null });
+    await get().setDataset(dataset);
   },
 
-  recompute: () => {
+  recompute: async () => {
     const { dataset, cfc, thresholds, config } = get();
     if (!dataset) {
       set({ result: null });
       return;
     }
     const effectiveCfc = bestCfcFor(dataset.sampleRate, cfc);
-    const result = runAnalysis(dataset, effectiveCfc, thresholds, config);
-    set({ result, cfc: effectiveCfc });
+    const token = ++recomputeToken;
+    set({ computing: true, error: null, cfc: effectiveCfc });
+    try {
+      const result = await runAnalysis(dataset, {
+        cfc: effectiveCfc,
+        thresholds,
+        suspendedMassKg: config.suspendedMassKg,
+        pendantLengthM: config.pendantLengthM,
+      });
+      if (token !== recomputeToken) return; // superseded by a newer request
+      set({ result, computing: false });
+    } catch (e) {
+      if (token !== recomputeToken) return;
+      set({
+        error: e instanceof Error ? e.message : 'Analysis failed.',
+        computing: false,
+      });
+    }
   },
 
   setRun: (slot, run) => set(slot === 'A' ? { runA: run } : { runB: run }),

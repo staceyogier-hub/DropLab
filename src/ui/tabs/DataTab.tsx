@@ -3,30 +3,71 @@ import { useStore } from '../../state/store';
 import { parseCsv } from '../../io/csv';
 import { SIMULATED_LABEL } from '../../domain/constants';
 import { getNode } from '../../domain/nodes';
+import { isDesktop, openTextFileNative } from '../../platform/native';
 import { Card, Empty } from '../components/common';
+
+// Friendly guard against pathologically large files locking up the parser.
+const MAX_BYTES = 120 * 1024 * 1024; // 120 MB
 
 export function DataTab() {
   const dataset = useStore((s) => s.dataset);
   const config = useStore((s) => s.config);
+  const computing = useStore((s) => s.computing);
   const generateFromConfig = useStore((s) => s.generateFromConfig);
   const setDataset = useStore((s) => s.setDataset);
   const setTab = useStore((s) => s.setTab);
   const fileRef = useRef<HTMLInputElement>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
 
-  const onFile = async (file: File) => {
+  const processText = async (name: string, text: string) => {
     setErrors([]);
     setWarnings([]);
-    const text = await file.text();
-    const res = parseCsv(text, { mode: config.mode, source: `Imported: ${file.name}` });
-    setWarnings(res.warnings);
-    if (res.errors.length || !res.dataset) {
-      setErrors(res.errors.length ? res.errors : ['Failed to parse the file.']);
+    try {
+      const res = parseCsv(text, { mode: config.mode, source: `Imported: ${name}` });
+      setWarnings(res.warnings);
+      if (res.errors.length || !res.dataset) {
+        setErrors(res.errors.length ? res.errors : ['Failed to parse the file.']);
+        return;
+      }
+      await setDataset(res.dataset);
+      setTab('results');
+    } catch (e) {
+      setErrors([
+        `Could not read the file: ${e instanceof Error ? e.message : String(e)}. ` +
+          'Check it is a valid DropLab CSV.',
+      ]);
+    }
+  };
+
+  const onFile = async (file: File) => {
+    if (file.size > MAX_BYTES) {
+      setErrors([
+        `File is ${(file.size / 1024 / 1024).toFixed(0)} MB, larger than the ${
+          MAX_BYTES / 1024 / 1024
+        } MB limit. Please decimate or split it first.`,
+      ]);
       return;
     }
-    setDataset(res.dataset);
-    setTab('results');
+    setBusy(true);
+    try {
+      const text = await file.text();
+      await processText(file.name, text);
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const onNativeOpen = async () => {
+    setBusy(true);
+    try {
+      const opened = await openTextFileNative([{ name: 'CSV', extensions: ['csv'] }]);
+      if (opened) await processText(opened.name, opened.text);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -40,7 +81,7 @@ export function DataTab() {
               Setup ({config.mode === 'ext' ? 'external lift' : `airdrop ${config.mode}`}).
             </p>
             <div className="btn-row">
-              <button className="btn" onClick={generateFromConfig}>
+              <button className="btn" disabled={busy || computing} onClick={() => void generateFromConfig()}>
                 Generate from Test Setup
               </button>
             </div>
@@ -51,20 +92,29 @@ export function DataTab() {
               Schema: <span className="mono">node_id, t_s, ax_g … tension_kN</span>. Parsed locally;
               nothing is uploaded.
             </p>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".csv,text/csv"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void onFile(f);
-              }}
-            />
+            {isDesktop() ? (
+              <button className="btn secondary" disabled={busy} onClick={() => void onNativeOpen()}>
+                Open CSV…
+              </button>
+            ) : (
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".csv,text/csv"
+                aria-label="Import CSV file"
+                disabled={busy}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void onFile(f);
+                }}
+              />
+            )}
+            {busy && <p className="small muted">Reading…</p>}
           </div>
         </div>
 
         {errors.length > 0 && (
-          <div className="notice warn" style={{ marginTop: 14 }}>
+          <div className="notice warn" style={{ marginTop: 14 }} role="alert">
             <strong>Import errors:</strong>
             <ul className="small" style={{ margin: '6px 0 0' }}>
               {errors.map((e, i) => (

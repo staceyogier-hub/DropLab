@@ -1,12 +1,12 @@
 import { useStore } from '../../state/store';
 import {
   buildWorkbook,
-  downloadText,
-  downloadWorkbook,
   metricsToCsv,
   resultToJson,
   timeSeriesToCsv,
+  workbookToArrayBuffer,
 } from '../../io/exporters';
+import { isDesktop, saveBytes, saveText } from '../../platform/native';
 import { Card, Empty } from '../components/common';
 
 export function ExportTab() {
@@ -26,11 +26,21 @@ export function ExportTab() {
   const stamp = new Date().toISOString().slice(0, 10);
   const name = (ext: string) => `${base}_${stamp}.${ext}`;
 
+  const saveXlsx = () => {
+    const buf = workbookToArrayBuffer(buildWorkbook(result, dataset));
+    return saveBytes(
+      name('xlsx'),
+      new Uint8Array(buf),
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+  };
+
   return (
     <>
       <Card title="Export results">
         <div className="notice info small">
-          All exports are produced locally in your browser — nothing is uploaded.
+          All exports are produced locally{isDesktop() ? ' (native Save dialog)' : ' in your browser'}{' '}
+          — nothing is uploaded.
         </div>
         {result.simulated && <div className="notice sim">Exporting SIMULATED data.</div>}
 
@@ -38,22 +48,27 @@ export function ExportTab() {
           <div>
             <h3>Data files</h3>
             <div className="btn-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-              <button className="btn secondary" onClick={() => downloadText(name('metrics.csv'), metricsToCsv(result), 'text/csv')}>
+              <button
+                className="btn secondary"
+                onClick={() => void saveText(name('metrics.csv'), metricsToCsv(result), 'text/csv')}
+              >
                 Metrics CSV
               </button>
               <button
                 className="btn secondary"
-                onClick={() => downloadText(name('timeseries.csv'), timeSeriesToCsv(dataset), 'text/csv')}
+                onClick={() => void saveText(name('timeseries.csv'), timeSeriesToCsv(dataset), 'text/csv')}
               >
                 Time-series CSV (decimated)
               </button>
               <button
                 className="btn secondary"
-                onClick={() => downloadText(name('result.json'), resultToJson(result, dataset), 'application/json')}
+                onClick={() =>
+                  void saveText(name('result.json'), resultToJson(result, dataset), 'application/json')
+                }
               >
                 Full result JSON
               </button>
-              <button className="btn" onClick={() => downloadWorkbook(name('xlsx'), buildWorkbook(result, dataset))}>
+              <button className="btn" onClick={() => void saveXlsx()}>
                 Excel workbook (XLSX)
               </button>
             </div>
