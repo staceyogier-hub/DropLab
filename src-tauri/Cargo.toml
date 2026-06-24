@@ -1,0 +1,28 @@
+[package]
+name = "droplab"
+version = "0.1.0"
+description = "DropLab — Airdrop Data Analyser (ADIS)"
+authors = ["ADIS"]
+edition = "2021"
+rust-version = "1.77"
+
+# The frontend (the same React/Vite app) is wrapped unchanged; this crate only
+# provides the native shell with local file open/save dialogs.
+
+[lib]
+name = "droplab_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# This feature is used for production builds where `devUrl` is unset.
+custom-protocol = ["tauri/custom-protocol"]
