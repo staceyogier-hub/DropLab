@@ -16,6 +16,7 @@ import type {
 import { validCfcClasses } from '../engine/filters';
 import { generateAirdrop, generateExternalLift } from '../engine/generators';
 import { runAnalysis } from './analysisClient';
+import { withEnabledNodes } from './select';
 import { DEFAULT_CONFIG, DEFAULT_THRESHOLDS } from './thresholds';
 import { getPreset, type Preset } from './presets';
 
@@ -171,7 +172,8 @@ export const useStore = create<StoreState>((set, get) => ({
     const token = ++recomputeToken;
     set({ computing: true, error: null, cfc: effectiveCfc });
     try {
-      const result = await runAnalysis(dataset, {
+      // Analyse only the fitted (enabled) nodes.
+      const result = await runAnalysis(withEnabledNodes(dataset, config.enabledNodes), {
         cfc: effectiveCfc,
         thresholds,
         suspendedMassKg: config.suspendedMassKg,

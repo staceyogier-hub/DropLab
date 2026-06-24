@@ -64,6 +64,7 @@ export function computeNodeMetrics(
   impactTimeS: number,
   canopyOpenTimeS: number | null,
   suspendedMassKg: number,
+  isExternal = false,
 ): NodeMetrics {
   const def = getNode(s.nodeId);
   const peakIdx = Math.max(0, argMax(r));
@@ -102,11 +103,31 @@ export function computeNodeMetrics(
     if (!Number.isFinite(inFlightMaxG)) inFlightMaxG = 0;
   }
 
-  // Attitude at impact.
-  const impactIdx = nearestIndex(s.t, impactTimeS);
-  const attitudeRollDeg = impactIdx >= 0 ? s.roll[impactIdx] : 0;
-  const attitudePitchDeg = impactIdx >= 0 ? s.pitch[impactIdx] : 0;
-  const offLevelDeg = magnitude2(attitudeRollDeg, attitudePitchDeg);
+  // Attitude / off-level. Airdrop: at impact. External lift: there is no
+  // impact, so report the peak swing over the whole lift window and the
+  // attitude at that instant.
+  let attitudeRollDeg: number;
+  let attitudePitchDeg: number;
+  let offLevelDeg: number;
+  if (isExternal) {
+    let bestIdx = 0;
+    let best = -1;
+    for (let i = 0; i < s.roll.length; i++) {
+      const o = magnitude2(s.roll[i], s.pitch[i]);
+      if (o > best) {
+        best = o;
+        bestIdx = i;
+      }
+    }
+    attitudeRollDeg = s.roll.length ? s.roll[bestIdx] : 0;
+    attitudePitchDeg = s.pitch.length ? s.pitch[bestIdx] : 0;
+    offLevelDeg = best < 0 ? 0 : best;
+  } else {
+    const impactIdx = nearestIndex(s.t, impactTimeS);
+    attitudeRollDeg = impactIdx >= 0 ? s.roll[impactIdx] : 0;
+    attitudePitchDeg = impactIdx >= 0 ? s.pitch[impactIdx] : 0;
+    offLevelDeg = magnitude2(attitudeRollDeg, attitudePitchDeg);
+  }
 
   const peakTensionKN = s.tension ? maxOf(s.tension) : null;
 

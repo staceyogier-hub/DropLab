@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useStore } from '../../state/store';
+import { withEnabledNodes } from '../../state/select';
 import { Card, Empty } from '../components/common';
 import { LineChart, type PhaseMarker } from '../charts/LineChart';
 import { NodeMap } from '../charts/NodeMap';
@@ -38,18 +39,24 @@ export function ChartsTab() {
     [result],
   );
 
-  const resultant = useMemo(
-    () => (dataset ? resultantSeries(dataset, cfc) : []),
-    [dataset, cfc],
+  // Chart only the fitted (enabled) nodes, matching the analysis.
+  const shown = useMemo(
+    () => (dataset ? withEnabledNodes(dataset, config.enabledNodes) : null),
+    [dataset, config.enabledNodes],
   );
-  const tension = useMemo(() => (dataset ? tensionSeries(dataset) : []), [dataset]);
-  const descent = useMemo(() => (dataset ? descentSeries(dataset) : { altitude: [], rate: [] }), [dataset]);
-  const swing = useMemo(() => (dataset ? swingSeries(dataset) : []), [dataset]);
+
+  const resultant = useMemo(() => (shown ? resultantSeries(shown, cfc) : []), [shown, cfc]);
+  const tension = useMemo(() => (shown ? tensionSeries(shown) : []), [shown]);
+  const descent = useMemo(
+    () => (shown ? descentSeries(shown) : { altitude: [], rate: [] }),
+    [shown],
+  );
+  const swing = useMemo(() => (shown ? swingSeries(shown) : []), [shown]);
 
   const impactTime = result?.events.find((e) => e.kind === 'impact')?.time_s ?? null;
   const zoom = useMemo(
-    () => (dataset && impactTime != null ? impactZoomSeries(dataset, cfc, impactTime) : []),
-    [dataset, cfc, impactTime],
+    () => (shown && impactTime != null ? impactZoomSeries(shown, cfc, impactTime) : []),
+    [shown, cfc, impactTime],
   );
 
   if (!dataset || !result) {

@@ -7,6 +7,7 @@ import {
   workbookToArrayBuffer,
 } from '../../io/exporters';
 import { isDesktop, saveBytes, saveText } from '../../platform/native';
+import { withEnabledNodes } from '../../state/select';
 import { Card, Empty } from '../components/common';
 
 export function ExportTab() {
@@ -25,6 +26,8 @@ export function ExportTab() {
   const base = config.testReference || 'droplab';
   const stamp = new Date().toISOString().slice(0, 10);
   const name = (ext: string) => `${base}_${stamp}.${ext}`;
+  // Export only fitted (enabled) nodes, consistent with the analysis.
+  const fitted = withEnabledNodes(dataset, config.enabledNodes);
 
   const saveXlsx = () => {
     const buf = workbookToArrayBuffer(buildWorkbook(result, dataset));
@@ -56,7 +59,7 @@ export function ExportTab() {
               </button>
               <button
                 className="btn secondary"
-                onClick={() => void saveText(name('timeseries.csv'), timeSeriesToCsv(dataset), 'text/csv')}
+                onClick={() => void saveText(name('timeseries.csv'), timeSeriesToCsv(fitted), 'text/csv')}
               >
                 Time-series CSV (decimated)
               </button>
@@ -79,7 +82,9 @@ export function ExportTab() {
               Opens a dedicated print view with a DRAFT watermark; use your browser’s “Save as PDF”.
             </p>
             <div className="btn-row">
-              <a className="btn" href="#print" target="_blank" rel="noopener">
+              {/* Same-tab navigation so the in-memory analysis (Zustand store,
+                  not persisted) is still present when the report renders. */}
+              <a className="btn" href="#print">
                 Open print report
               </a>
             </div>

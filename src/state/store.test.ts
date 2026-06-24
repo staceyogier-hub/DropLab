@@ -55,4 +55,21 @@ describe('store — load → analyse flow', () => {
     const lo = useStore.getState().result!.summary.peakImpactAccelG;
     expect(lo).toBeLessThanOrEqual(hi + 1e-9);
   });
+
+  it('excludes unfitted (disabled) nodes from the analysis', async () => {
+    await useStore.getState().applyPreset('a22-lv');
+    await useStore.getState().generateFromConfig();
+    const peakNode = useStore.getState().result!.summary.peakImpactNodeId!;
+    expect(peakNode).not.toBeNull();
+
+    // Unfit the node that produced the peak; results must recompute without it.
+    const remaining = useStore
+      .getState()
+      .config.enabledNodes.filter((n) => n !== peakNode);
+    await useStore.getState().setConfig({ enabledNodes: remaining });
+
+    const after = useStore.getState().result!;
+    expect(after.nodeMetrics.some((m) => m.nodeId === peakNode)).toBe(false);
+    expect(after.summary.peakImpactNodeId).not.toBe(peakNode);
+  });
 });

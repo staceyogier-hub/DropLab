@@ -105,4 +105,13 @@ describe('analyse — external lift', () => {
     expect(objectives.join(' ')).toMatch(/tension/i);
     expect(objectives.join(' ')).toMatch(/swing/i);
   });
+
+  it('reports per-node peak swing in EL mode, not the t=0 attitude', () => {
+    // A load-body node oscillates after pick-up; its off-level must reflect the
+    // peak swing over the lift, not the near-zero attitude at t = 0.
+    const m = result.nodeMetrics.find((x) => x.nodeId === 'LOAD-FL')!;
+    expect(m.offLevelDeg).toBeGreaterThan(1);
+    // A single node cannot exceed the across-nodes peak swing.
+    expect(m.offLevelDeg).toBeLessThanOrEqual(result.external!.peakSwingDeg + 1e-9);
+  });
 });

@@ -164,6 +164,7 @@ export function analyse(data: Dataset, opts: AnalyseOptions): AnalysisResult {
       impactTimeS,
       canopyOpenTimeS,
       opts.suspendedMassKg,
+      isExternal,
     ),
   );
 
